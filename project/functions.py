@@ -12,6 +12,10 @@ from collections import Counter
 from scipy.sparse import csr_matrix
 from sklearn import preprocessing
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.decomposition import LatentDirichletAllocation as LDA
+from sklearn.decomposition import NMF
+from sklearn.ensemble import RandomForestClassifier as RFC
+from sklearn.pipeline import Pipeline
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.model_selection import cross_val_score
@@ -19,13 +23,13 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score
 from sklearn.svm import SVC
 from util import SimplePreprocessing
 from upbg import UPBG
+from gnn import *
 from nltk.corpus import reuters
 from dataclasses import dataclass
 from logger import get_logger
 
 import torch
 import torch.nn.functional as F
-from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv, Linear, to_hetero
 from torch_geometric.transforms import RandomLinkSplit
 
 
@@ -48,8 +52,7 @@ class Database:
         self.filenames = filenames
         self.DESCR = DESCR
 
-
-        
+       
 def load_data(database_name, subset):
     
     try:
@@ -170,7 +173,40 @@ def load_pbg_test(database_name, pbg_model_trained=None, K=100, disable_tqdm=Tru
     except Exception as e:
         logger.info(f'Error fitting pbg for {database_name}({subset}): \n {e}')
         
-        
+
+def get_lda_train(database_name, K=100):
+    try:
+        subset='train'
+        database = load_data(database_name="20newsgroups", subset=subset)
+        cv = CountVectorizer(max_df=0.95, min_df=2, max_features=5000, stop_words='english', ngram_range=(1, 2))
+        lda = LDA(n_components=100, max_iter=30, random_state=1, n_jobs=-1)
+        rfc = RFC(n_estimators=1000, n_jobs=-1)
+        estimators = [("cv", cv), ("lda", lda), ("rfc", rfc)]
+
+        pipe = Pipeline(estimators)
+        pipe.fit(database.data, database.target)
+        return pipe
+    
+    except Exception as e:
+        logger.info(f'Error fitting lda for {database_name}({subset}): \n {e}')
+
+def get_nmf_train(database_name, K=100):
+    try:
+        subset='train'
+        K=100
+        database = load_data(database_name="20newsgroups", subset=subset)
+        tfidf = TfidfVectorizer(max_df=0.95, min_df=2, max_features=5000, stop_words='english', ngram_range=(1, 2))
+        nmf = NMF(n_components=K, random_state=1, alpha=.1, l1_ratio=.5, init='nndsvd')
+        rfc = RFC(n_estimators=1000, n_jobs=-1)
+        estimators = [("tfidf", tfidf), ("nmf", nmf), ("rfc", rfc)]
+
+        pipe = Pipeline(estimators)
+        pipe.fit(database.data, database.target)
+        return pipe
+
+    except Exception as e:
+        logger.info(f'Error fitting nmf for {database_name}({subset}): \n {e}')
+
 def get_heterograph_pbg(pbg):
 
     from torch_geometric.data import HeteroData
@@ -216,58 +252,6 @@ def get_heterograph_pbg(pbg):
     
     logger.info(f'Generated bipartite graph: \n{heterodata}')
     return heterodata
-
-class GNN(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels):
-        super().__init__()
-        self.conv1 = SAGEConv((-1, -1), hidden_channels)
-        self.conv2 = SAGEConv((-1, -1), out_channels)
-
-    def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index)
-        return x
-
-class HeteroGNN(torch.nn.Module):
-       
-    def __init__(self, metadata, hidden_channels, out_channels, num_layers, p_dropout):
-        super().__init__()
-        self.metadata = metadata
-        self.hidden_channels = hidden_channels
-        self.out_channels = out_channels,
-        self.num_layers = num_layers
-        self.p_dropout = p_dropout
-
-        self.convs = torch.nn.ModuleList()
-        for _ in range(num_layers):
-            conv = HeteroConv({
-                edge_type: SAGEConv((-1, -1), hidden_channels) for edge_type in metadata[1]
-            }, aggr='sum')
-            self.convs.append(conv)
-
-        self.lin = Linear(hidden_channels, out_channels)
-
-    def forward(self, x_dict, edge_index_dict):
-        for conv in self.convs:
-            x_dict = conv(x_dict, edge_index_dict)
-            x_dict = {key: F.leaky_relu(x) for key, x in x_dict.items()}
-            x_dict = {key: F.dropout(x, p=self.p_dropout) for key, x in x_dict.items()}
-        return self.lin(x_dict["source"])
-        
-    
-class GAT(torch.nn.Module):
-    def __init__(self, hidden_channels, out_channels):
-        super().__init__()
-        self.conv1 = GATConv((-1, -1), hidden_channels, add_self_loops=False)
-        self.lin1 = Linear(-1, hidden_channels)
-        self.conv2 = GATConv((-1, -1), out_channels, add_self_loops=False)
-        self.lin2 = Linear(-1, out_channels)
-
-    def forward(self, x, edge_index):
-        x = self.conv1(x, edge_index) + self.lin1(x)
-        x = x.relu()
-        x = self.conv2(x, edge_index) + self.lin2(x)
-        return x
 
 def seed_everything(seed: int):
     import random
@@ -419,6 +403,8 @@ def run_heterognn_splitted_v2(database_name,
         min_loss = np.inf
         loss_array = []
         block_eval_loss = patience // 2
+
+        model_name = f"model_{database_name}_hid_{hidden_channels}_layers_{num_layers}".replace("=", "_").replace(" ", "_")
              
         for epoch in trange(num_epochs, disable=not verbose):
             loss = train_model(model, heterodata_train)
@@ -440,7 +426,7 @@ def run_heterognn_splitted_v2(database_name,
 
             micro, accuracy = test_model(best_model, heterodata_test)
 
-        with open(f'./pickle_objects/model_heterognn_{database_name}.pickle', 'wb') as f:
+        with open(f'./pickle_objects/{model_name}.pickle', 'wb') as f:
             pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
         return loss, micro, accuracy, epoch+1
     
