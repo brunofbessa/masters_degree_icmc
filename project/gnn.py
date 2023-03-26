@@ -6,7 +6,7 @@ from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv, Linear, t
 from torch_geometric.transforms import RandomLinkSplit
 
 
-logger = get_logger('log')
+logger = get_logger('log_gnn')
 
 
 class GNN(torch.nn.Module):
