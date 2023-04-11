@@ -1,5 +1,6 @@
 from functions import *
 import pickle
+import glob
 
 logger = get_logger('log_experiments')
 
@@ -38,19 +39,19 @@ def run_experiment_gnn(database_name, K, hidden_channels_list, num_layers_list, 
 
 if __name__ == '__main__':
 
-    databse_list = ['webkb', '20ng', 'agnews', 'reuters', 'bbcnews', 'classic4']
+    databse_list = ['reuters', 'bbcnews', 'classic4']
     K_values = [100 , 50, 10]
     hidden_channels_list = [100, 50, 10]
     num_layers_list = [2, 3, 4]
     p_dropout_list = [0.0]
-    patience = 500
+    patience = 200
 
     logger.info('Running experiments on datasets with heterographs and GNNs.')
 
     for database_name in databse_list:
         for K in K_values:
             run_experiment_gnn(database_name, K, hidden_channels_list, num_layers_list, p_dropout_list, patience)
-    import glob
+
 
 dataframes_path_list = []
 for file in glob.glob('pickle_objects/experiments/*.pickle'):

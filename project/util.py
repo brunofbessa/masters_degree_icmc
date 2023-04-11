@@ -241,7 +241,7 @@ class SimplePreprocessing():
 
     def transform(self, docs):
         tokenizer = RegexpTokenizer(r'\w+')
-        stopwords = nltk.corpus.stopwords.words('english') + ['would']
+        stopwords = nltk.corpus.stopwords.words('english')
         pattern = re.compile(r'\b(' + r'|'.join(stopwords) + r')\b\s*')
         for idx in range(len(docs)):
             docs[idx] = docs[idx].lower()  # Convert to lowercase.
