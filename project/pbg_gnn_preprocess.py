@@ -5,31 +5,38 @@ logger = get_logger('log_preprocess')
 
 seed_everything(seed=42)
 
-def preprocess_datasets_pbg(databse_name, K):
+def preprocess_datasets_pbg(databse_name, K, Kc, docf_values, docst_values, preproc_pbg=False):
     try:
+        if preproc_pbg == False:
+            logger.info(f'Running PBG on {databse_name} with K={K}, Kc={Kc}')
+            pbg_train, pbg_test = run_pbg_on_dataset(database_name=databse_name, K=K, K_cosine=Kc, disable_tqdm=True)
+            
+            with open(f'./pickle_objects/preprocess/{database_name}/pbg_{database_name}_K_{K}_Kc_{Kc}_train.pickle', 'wb') as f:
+                pickle.dump(pbg_train, f, pickle.HIGHEST_PROTOCOL)
+            with open(f'./pickle_objects/preprocess/{database_name}/pbg_{database_name}_K_{K}_Kc_{Kc}_test.pickle', 'wb') as f:
+                pickle.dump(pbg_test, f, pickle.HIGHEST_PROTOCOL)
 
-        logger.info(f'Running PBG on {databse_name} with K={K}')
-        pbg_train, pbg_test = run_pbg(database_name=databse_name, K=K, disable_tqdm=True)
-        heterodata_pbg_train = get_heterograph_pbg(pbg_train)
-        heterodata_pbg_test_full = get_heterograph_pbg(pbg_test)
-        heterodata_pbg_val, heterodata_pbg_test, heterodata_pbg_score = split_heterodata(heterodata_pbg_test_full)
+        else:
+            logger.info(f'Already preprocessed pbg objects for {databse_name} with K={K}, Kc={Kc}.')
+            with open(f'./pickle_objects/preprocess/{database_name}/pbg_{database_name}_K_{K}_Kc_{Kc}_train.pickle', 'rb') as f:
+                pbg_train = pickle.load(f)
+            with open(f'./pickle_objects/preprocess/{database_name}/pbg_{database_name}_K_{K}_Kc_{Kc}_test.pickle', 'rb') as f:
+                pbg_test = pickle.load(f)
 
-        with open(f'./pickle_objects/preprocess/pbg_{database_name}_k{K}_train.pickle', 'wb') as f:
-            pickle.dump(heterodata_pbg_train, f, pickle.HIGHEST_PROTOCOL)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_train.pickle', 'wb') as f:
-            pickle.dump(heterodata_pbg_train, f, pickle.HIGHEST_PROTOCOL)
-        with open(f'./pickle_objects/preprocess/pbg_{database_name}_k{K}_test.pickle', 'wb') as f:
-            pickle.dump(pbg_test, f, pickle.HIGHEST_PROTOCOL)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_test_full.pickle', 'wb') as f:
-            pickle.dump(heterodata_pbg_test_full, f, pickle.HIGHEST_PROTOCOL)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_val.pickle', 'wb') as f:
-            pickle.dump(heterodata_pbg_val, f, pickle.HIGHEST_PROTOCOL)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_test.pickle', 'wb') as f:
-            pickle.dump(heterodata_pbg_test, f, pickle.HIGHEST_PROTOCOL)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_score.pickle', 'wb') as f:
-            pickle.dump(heterodata_pbg_score, f, pickle.HIGHEST_PROTOCOL)
+        for docf in docf_values:
+            for docst in docst_values:
 
-        logger.info(f'Executed PBG on {databse_name} with K={K}. Results saved as pickle objects.')
+              description = f'K_{K}_Kc_{Kc}_docf_{str(docf)}_docst_{str(docst)}'
+        
+              heterodata_pbg_train = get_heterograph_pbg_features(pbg_train, doc_features=docf, doc_similarity_thres=docst)
+              heterodata_pbg_test = get_heterograph_pbg_features(pbg_test, doc_features=docf, doc_similarity_thres=docst)
+        
+              with open(f'./pickle_objects/preprocess/{database_name}/heterodata_pbg_{database_name}_{description}_train.pickle', 'wb') as f:
+                  pickle.dump(heterodata_pbg_train, f, pickle.HIGHEST_PROTOCOL)  
+              with open(f'./pickle_objects/preprocess/{database_name}/heterodata_pbg_{database_name}_{description}_test.pickle', 'wb') as f:
+                  pickle.dump(heterodata_pbg_test, f, pickle.HIGHEST_PROTOCOL)
+
+              logger.info(f'Executed PBG on {databse_name} ({description}). Results saved as pickle objects.')
 
     except Exception as e:
         logger.info(f'Error occurred: \n{e}')
@@ -37,11 +44,17 @@ def preprocess_datasets_pbg(databse_name, K):
 
 if __name__ == '__main__':
 
-    databse_list = ['20ng', 'agnews', 'reuters', 'bbcnews', 'classic4', 'nsf', 'webkb']
-    K_values = [10, 50, 100]
+    databse_list = ['20ng', '20ng', 'bbcnews', 'reuters', 'classic4', 'nsf', 'webkb', 'agnews']
+    K = 50
+    Kc = 400
+    docf_values = [None]
+    docst_values = [0.5]
+
+    
     logger.info('Generating heterographs for benchmark datasets.')
 
     for database_name in databse_list:
-        for K in K_values:
-            preprocess_datasets_pbg(database_name, K)
+        preprocess_datasets_pbg(database_name, K, Kc, docf_values, docst_values, preproc_pbg=True)
+
+
 

@@ -5,21 +5,17 @@ import pandas as pd
 import networkx as nx
 import logging
 import pickle
+import re
 
 from random import sample
 from tqdm import trange
-from collections import Counter
-from scipy.sparse import csr_matrix
-from sklearn import preprocessing
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation as LDA
 from sklearn.decomposition import NMF
 from sklearn.ensemble import RandomForestClassifier as RFC
 from sklearn.pipeline import Pipeline
-from sklearn.naive_bayes import MultinomialNB
 from sklearn.datasets import fetch_20newsgroups
-from sklearn.model_selection import cross_val_score
-from sklearn.metrics import f1_score, accuracy_score, precision_score
+from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from util import SimplePreprocessing
@@ -27,6 +23,9 @@ from upbg import UPBG
 from gnn import *
 from nltk.corpus import reuters
 from dataclasses import dataclass
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+from chunkdot import cosine_similarity_top_k
+
 from logger import get_logger
 
 import ktrain
@@ -91,7 +90,7 @@ def load_data(database_name, subset):
 
             database = Database(target_names, data, target, filenames, DESCR)
         
-        elif database_name in ['bbc_news', 'bbcnews']:
+        elif database_name in ['bbc_news', 'bbcnews', 'bbc']:
             dataframe = pd.read_csv('data/bbc_news.csv', sep=',')
 
             if subset == 'train':
@@ -204,12 +203,17 @@ def load_data(database_name, subset):
 
             database = Database(target_names, data, target, filenames, DESCR)     
         
+        else:
+             logger.info(f'Database name provided ({database_name}) is not valid.')
+             raise  
+
+
         logger.info(f'Loaded data for {database_name} {subset}. {len(target_names)} classes: {str(target_names)}. Number of documents: {len(data)}.')                                    
         return database
-
+    
     except Exception as e:
         logger.error(f"Error getting data: \n{e}")
-    
+        raise
               
 def load_pbg_train(database_name, K=100, disable_tqdm=True):
     
@@ -308,9 +312,10 @@ def load_pbg_test(database_name, pbg_model_trained=None, K=100, disable_tqdm=Tru
     except Exception as e:
         logger.info(f'Error fitting pbg for {database_name}: \n {e}')    
 
-def run_pbg_deprecated(database_name, K=100, disable_tqdm=True):
-    
+def run_pbg_on_dataset(database_name, K, K_cosine=0, disable_tqdm=True):
+
     try:
+    
         database_train = load_data(database_name=database_name, subset='train')
         database_test = load_data(database_name=database_name, subset='test')
 
@@ -319,66 +324,54 @@ def run_pbg_deprecated(database_name, K=100, disable_tqdm=True):
         vectorizer = TfidfVectorizer()
         data_vectorized_train_fit = vectorizer.fit_transform(data_preprocessed_train)
         data_vectorized_test = vectorizer.transform(data_preprocessed_test)
-        data_vectorized_test_fit = vectorizer.fit_transform(data_preprocessed_test)
-                
+
         pbg_train = UPBG(K, alpha=0.005, beta=0.001, local_max_itr=50, global_max_itr=10,
-           local_threshold=1e-6, global_threshold=1e-6,
-           feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
+        local_threshold=1e-6, global_threshold=1e-6,
+        feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
         pbg_train.fit(data_vectorized_train_fit, database_train.target)
-        
+
         predicted_target = pbg_train.predict(data_vectorized_test)
-        micro_train = f1_score(predicted_target, database_test.target, average='micro')
-        logger.info(f'Performance on pretrained pbg on {database_name} with K={K}. F1: {micro_train:.4f}.')
-        
-        data_vectorized_test = vectorizer.transform(data_preprocessed_test)
-        pbg_test = UPBG(K, alpha=0.005, beta=0.001, local_max_itr=50, global_max_itr=10,
-               local_threshold=1e-6, global_threshold=1e-6,
-               feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
-        pbg_test.fit(data_vectorized_test_fit, predicted_target)
-        y_pred = pbg_test.predict(data_vectorized_test)
-        micro_test = f1_score(y_pred, database_test.target, average='micro')
+        micro = f1_score(predicted_target, database_test.target, average='micro')
+        logger.info(f'Loaded pbg for {database_name} (train set) with K={K}. F1: {micro:.4f}.')
 
-        logger.info(f'Loaded pbg for {database_name} with K={K}. F1: {micro_test:.4f}.')
-        return pbg_train, pbg_test
-    
-    except Exception as e:
-        logger.info(f'Error fitting pbg for {database_name}: \n {e}')    
-
-def run_pbg(database_name, K=100, disable_tqdm=True):
-    
-    try:
-        database_train = load_data(database_name=database_name, subset='train')
-        database_test = load_data(database_name=database_name, subset='test')
-
-        data_preprocessed_train = SimplePreprocessing().transform(database_train.data)
-        data_preprocessed_test = SimplePreprocessing().transform(database_test.data)
-        vectorizer = TfidfVectorizer()
-        data_vectorized_train_fit = vectorizer.fit_transform(data_preprocessed_train)
         data_vectorized_test_fit = vectorizer.fit_transform(data_preprocessed_test)
         data_vectorized_test = vectorizer.transform(data_preprocessed_test)
-                
-        pbg_train = UPBG(K, alpha=0.005, beta=0.001, local_max_itr=50, global_max_itr=10,
-           local_threshold=1e-6, global_threshold=1e-6,
-           feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
-        pbg_train.fit(data_vectorized_train_fit, database_train.target)
-        
-        predicted_target = pbg_train.predict(data_vectorized_test)
-        
-        data_vectorized_test = vectorizer.transform(data_preprocessed_test)
+
         pbg_test = UPBG(K, alpha=0.005, beta=0.001, local_max_itr=50, global_max_itr=10,
-               local_threshold=1e-6, global_threshold=1e-6,
-               feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
-        
+            local_threshold=1e-6, global_threshold=1e-6,
+            feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
+
         # Hide true labels. Mock labels with predictions from training set
         pbg_test.fit(data_vectorized_test_fit, predicted_target)
         y_pred = pbg_test.predict(data_vectorized_test)
         micro_test = f1_score(y_pred, database_test.target, average='micro')
 
+        #Write true labels with trained embeddings for future GNN test of accuracy
+        for index, value in enumerate(pbg_test.y):
+            pbg_test.y[index] = np.array(database_test.target[index])
+
+
+        sentences = [re.findall("[a-z\-]+",s.lower()) for s in data_preprocessed_train+data_preprocessed_test]
+
+        documents = [TaggedDocument(doc, [i]) for i, doc in enumerate(sentences)]
+        doc2vec_model = Doc2Vec(documents, vector_size=K_cosine, window=10, min_count=1, workers=4)
+        doc2vec_model.train(documents, total_examples=doc2vec_model.corpus_count, epochs=doc2vec_model.epochs)
+
+        document_features = doc2vec_model.dv.vectors
+
+        document_features_train = document_features[0:len(data_preprocessed_train)]
+        document_features_test = document_features[len(data_preprocessed_train):]
+
+        pbg_train.document_features = document_features_train
+        pbg_test.document_features = document_features_test
+
+
         logger.info(f'Loaded pbg for {database_name} with K={K}. F1: {micro_test:.4f}.')
         return pbg_train, pbg_test
-    
+
     except Exception as e:
-        logger.info(f'Error fitting pbg for {database_name}: \n {e}')    
+        logger.info(f'Error fitting pbg for {database_name}: \n {e}')     
+
 
 
 def get_lda_train(database_name, K=100):
@@ -414,49 +407,6 @@ def get_nmf_train(database_name, K=100):
     except Exception as e:
         logger.info(f'Error fitting nmf for {database_name}({subset}): \n {e}')
 
-
-def run_pbg_v2(database_name, K=100, disable_tqdm=True):
-    
-    try:
-        database_train = load_data(database_name=database_name, subset='train')
-        database_test = load_data(database_name=database_name, subset='test')
-
-        data_preprocessed_train = SimplePreprocessing().transform(database_train.data)
-        data_preprocessed_test = SimplePreprocessing().transform(database_test.data)
-        vectorizer = TfidfVectorizer()
-        data_vectorized_train_fit = vectorizer.fit_transform(data_preprocessed_train)
-        data_vectorized_test_fit = vectorizer.fit_transform(data_preprocessed_test)
-        data_vectorized_test = vectorizer.transform(data_preprocessed_test)
-                
-        pbg_train = UPBG(K, alpha=0.005, beta=0.001, local_max_itr=50, global_max_itr=10,
-           local_threshold=1e-6, global_threshold=1e-6,
-           feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
-        pbg_train.fit(data_vectorized_train_fit, database_train.target)
-        
-        predicted_target = pbg_train.predict(data_vectorized_test)
-        
-        data_vectorized_test = vectorizer.transform(data_preprocessed_test)
-        pbg_test = UPBG(K, alpha=0.005, beta=0.001, local_max_itr=50, global_max_itr=10,
-               local_threshold=1e-6, global_threshold=1e-6,
-               feature_names=vectorizer.get_feature_names_out(), disable_tqdm=disable_tqdm)
-        
-        # Hide true labels. Mock labels with predictions from training set
-        pbg_test.fit(data_vectorized_test_fit, predicted_target)
-        y_pred = pbg_test.predict(data_vectorized_test)
-        micro_test = f1_score(y_pred, database_test.target, average='micro')
-
-        # Write true labels with trained embeddings for future GNN test of accuracy
-        for index, value in enumerate(pbg_test.y):
-            pbg_test.y[index] = np.array(database_test.target[index])
-
-        print("Y aqui:")
-        print(pbg_test.y)
-
-        logger.info(f'Loaded pbg for {database_name} with K={K}. F1: {micro_test:.4f}.')
-        return pbg_train, pbg_test
-    
-    except Exception as e:
-        logger.info(f'Error fitting pbg for {database_name}: \n {e}')    
 
 
 def get_heterograph_pbg(pbg):
@@ -504,6 +454,100 @@ def get_heterograph_pbg(pbg):
         heterodata = NormalizeFeatures()(heterodata)
         
         logger.info(f'Generated bipartite graph: \nnum. source nodes: {len(_source_x)}, \nnum. target nodes: {len(_target_x)}, \nnum. classes: {pbg.n_class}')
+
+        return heterodata
+    
+    except Exception as e:
+        logger.info(f'Error heterograph for pbg.\n{e}')
+
+def get_heterograph_pbg_features(pbg, doc_features=None, doc_similarity_thres=0.9):
+    try:
+
+        from torch_geometric.data import HeteroData
+        from torch_geometric.transforms import RandomLinkSplit, ToUndirected, AddSelfLoops, NormalizeFeatures
+
+        _num_components = pbg.n_components
+        
+        if doc_features == 'merge':
+            _source_x = torch.from_numpy(np.concatenate((pbg.log_A, pbg.document_features), axis=1)).float()
+        elif doc_features == 'replace':
+            _source_x = torch.from_numpy(pbg.document_features).float()
+        else:
+            _source_x = torch.from_numpy(pbg.log_A).float()
+
+        _target_x = torch.from_numpy(pbg.log_B).float()
+
+        _adjacency_matrix = pbg.Xc.todense()
+        # _num_rows, _num_columns = _adjacency_matrix.shape  
+        # _from_node = []
+        # _to_node = []
+        
+        logger.info(f'Creating source-target edges.')
+
+        idx = np.where(_adjacency_matrix >0)
+        _from_node = np.array(idx[0])
+        _to_node = np.array(idx[1])
+        # for row in trange(_num_rows):
+        #     for column in range(_num_columns):
+        #         if _adjacency_matrix[row, column] > 0:
+        #             _from_node.append(row)
+        #             _to_node.append(column)
+
+        # _from_node = np.array(_from_node)
+        # _to_node = np.array(_to_node)
+        
+        _edge_index = torch.concat((torch.from_numpy(_from_node).long(), 
+                                    torch.from_numpy(_to_node).long()))
+        _edge_index = _edge_index.reshape(-1, _from_node.shape[0]).long()
+        _y = torch.from_numpy(pbg.y).long()
+
+        
+        # Build document-document edge_list based on cosine similarity  
+        if doc_similarity_thres is not None:
+            try:
+                logger.info(f'Attempt to calculate cosine similarities for all nodes.')
+                #all_sims = cosine_similarity(pbg.document_features)
+                all_sims = cosine_similarity_top_k(pbg.document_features, top_k=100)
+                logger.info(f'Calculated cosine similarities for source node featues.')
+                
+                logger.info(f'Computing source-source edges for cosine similarity nodes.')
+                idx = np.where(all_sims >= doc_similarity_thres)
+                _from_node = np.array(idx[0])
+                _to_node = np.array(idx[1])
+
+                _edge_index_document = torch.concat((torch.from_numpy(_from_node).long(), torch.from_numpy(_to_node).long()))
+                _edge_index_document = _edge_index_document.reshape(-1, _from_node.shape[0]).long()
+                
+                heterodata = HeteroData(
+                    {'source': {'x': _source_x, 'y': _y},
+                    'target': {'x': _target_x}},
+                    source__edge__target={'edge_index': _edge_index},
+                    source__edge__source={'edge_index': _edge_index_document}
+                )
+            except Exception as e:
+                logger.info(f'Could not create edges for source-source nodes: \n {e}')
+                heterodata = HeteroData(
+                    {'source': {'x': _source_x, 'y': _y},
+                    'target': {'x': _target_x}},
+                    source__edge__target={'edge_index': _edge_index}
+                )
+
+        else:
+            heterodata = HeteroData(
+                {'source': {'x': _source_x, 'y': _y},
+                'target': {'x': _target_x}},
+                source__edge__target={'edge_index': _edge_index}
+            )
+        
+        heterodata['source'].num_nodes = len(_source_x)
+        heterodata['target'].num_nodes = len(_target_x)
+        heterodata['source'].num_classes = pbg.n_class
+
+        heterodata = ToUndirected()(heterodata)
+        heterodata = AddSelfLoops()(heterodata)
+        heterodata = NormalizeFeatures()(heterodata)
+        
+        logger.info(f'Generated bipartite graph: num. source nodes: {len(_source_x)}, num. target nodes: {len(_target_x)}, num. classes: {pbg.n_class}')
 
         return heterodata
     
@@ -559,35 +603,6 @@ def seed_everything(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)    
 
-def train_model(model, train_dataset, lr=0.01, weight_decay=5e-4):
-    try: 
-        model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-        optimizer.zero_grad()
-        out = model(train_dataset.x_dict, train_dataset.edge_index_dict)
-        loss = F.cross_entropy(out, train_dataset['source'].y)
-        loss.backward()
-        optimizer.step()
-        return float(loss)
-    except Exception as e:
-        logger.error(f'Error training model: \n {e}')
-        raise
-
-def test_model(model, val_dataset):
-    try:
-        model.eval()
-        out = model(val_dataset.x_dict, val_dataset.edge_index_dict)
-        prediction = out.argmax(1).cpu().numpy()
-        true_values = val_dataset['source'].y.cpu().numpy()
-        micro = f1_score(true_values, prediction, average='weighted', zero_division=0)
-        accuracy = accuracy_score(true_values, prediction, normalize=True)
-        loss = float(F.cross_entropy(out, val_dataset['source'].y))
-        precision = precision_score(true_values, prediction, average=None, zero_division=0)
-        return micro, accuracy, loss
-
-    except Exception as e:
-        logger.error(f'Error testing model: \n {e}')
-        raise
 
 def test_pipe(model, database_name):
     
@@ -599,24 +614,6 @@ def test_pipe(model, database_name):
 
     except Exception as e:
         logger.error(f'Error testing model: \n {e}')  
-
-def run_heterognn(heterodata, num_epochs=100, verbose=False):
-    transform = RandomLinkSplit(num_val=0.05, 
-                           num_test=0.1, 
-                           neg_sampling_ratio=0.0,
-                           edge_types=[('source', 'edge', 'target')], 
-                           rev_edge_types=[('target', 'rev_edge', 'source')])
-    train_dataset, val_dataset, test_dataset = transform(heterodata)
-    
-    model = HeteroGNN(heterodata.metadata(), hidden_channels=64, out_channels=heterodata['source']['num_classes'],
-                  num_layers=3)
-    for epoch in range(num_epochs):
-        loss = train_model(model, train_dataset) 
-        micro, accuracy = test_model(model, val_dataset)
-        if verbose:
-            logger.info(f"epoch: {epoch}, loss: {loss:.2f}, f1: {micro:.2f}, acc: {accuracy:.2f}")
-        
-    return loss, micro, accuracy
 
 def split_heterodata(heterodata): 
     try:
@@ -634,140 +631,18 @@ def split_heterodata(heterodata):
     except Exception as e:
         logger.error(f'Error splitting heterogeneous graph: \n {e}')
 
-def run_heterognn_splitted_v2(database_name,
-                           heterodata_train,
-                           heterodata_val,
-                           heterodata_test,
-                           hidden_channels,
-                           num_layers,
-                           p_dropout=0.2,
-                           num_epochs=300, 
-                           patience=100,
-                           verbose=False):
 
-    try:
-
-        import warnings
-        import timeit 
-
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        time_start = timeit.default_timer()
-
-        model = HeteroGNN(metadata=heterodata_train.metadata(), 
-                          hidden_channels=hidden_channels, 
-                          out_channels=heterodata_train['source']['num_classes'],
-                          num_layers=num_layers,
-                          p_dropout=p_dropout)
-        min_loss = np.inf
-        max_acc = 0
-        loss_array = []
-        epoch_convergence = 0
-        block_eval_loss = 10
-
-        output_list = []
-        df = pd.DataFrame(columns=['database_name', 'hidden_channels', 'num_layers', 'p_dropout', 'loss_train', 'loss_val', 'micro_val', 'acc_val', 'epoch', 'epoch_convergence', 'elapsed_time'])
-
-        model_name = f"model_{database_name}_hid_{hidden_channels}_layers_{num_layers}_pdrop_{p_dropout}".replace("=", "_").replace(" ", "_")
-
-        for epoch in trange(num_epochs, disable=not verbose):
-            loss_train = train_model(model=model, train_dataset=heterodata_train, lr=0.001, weight_decay=5e-4)
-
-            micro_train, acc_train, _ = test_model(model, heterodata_val)
-            micro_val, acc_val, loss_val = test_model(model, heterodata_val)
-            
-            loss_array.append(loss_train)
-            if loss_train <= min_loss and acc_train >= max_acc:
-                min_loss = loss_train
-                max_acc = acc_train
-                best_model = model
-                epoch_convergence = epoch
-                if verbose:
-                    logger.info(f'Best model updated at epoch {epoch}.')
-                    logger.info(f"[VAL. SET] epoch: {epoch}, loss: {loss_val:.4f}, f1: {micro_val:.4f}, acc: {acc_val:.4f}")
-
-
-            time_end = timeit.default_timer()
-            elapsed_time = round((time_end - time_start) * 10 ** 0, 3)
-            output_list = [database_name, hidden_channels, num_layers, p_dropout, loss_train, loss_val, micro_val, acc_val, epoch, epoch_convergence, elapsed_time]
-            row = pd.Series(output_list, index=df.columns)
-            df = df.append(row,ignore_index=True) 
-            if epoch >= patience:
-                tmp_loss_array = loss_array[-block_eval_loss+1: -1]
-                if loss_train > np.mean(tmp_loss_array).item():
-                    break
-
-        micro_test, acc_test, loss_test = test_model(best_model, heterodata_test)
-        logger.info(f"[TEST SET] Optimal solution: epoch: {epoch}, loss: {loss_test:.4f}, f1: {micro_test:.4f}, acc: {acc_test:.4f}")
-        
-        df.to_csv(f'./csv_objects/training/{model_name}.csv', sep=';', decimal=',', index=False)
-        
-        with open(f'./pickle_objects/models/{model_name}.pickle', 'wb') as f:
-            pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
-        return loss_test, micro_test, acc_test, epoch_convergence+1
-    
-    except Exception as e:
-        logger.error(f'Error training model on heterodata: \n {e}')
-
-
-def experiment_gnn(database_name, 
-                        heterodata_pbg_train, 
-                        heterodata_pbg_val,
-                        heterodata_pbg_test, 
-                        num_epochs, 
-                        patience,
-                        hidden_channels_list,
-                        num_layers_list,
-                        p_dropout_list,
-                        verbose):
-    try:
-        import warnings
-        import timeit 
-
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        output_list = []
-        df = pd.DataFrame(columns=['database_name', 'hidden_channels', 'num_layers', 'p_dropout', 'loss', 'f1', 'acc', 'epochs', 'elapsed_time'])
-
-        for hidden_channels in hidden_channels_list:
-            for num_layers in num_layers_list:
-                for p_dropout in p_dropout_list:
-                    time_start = timeit.default_timer()
-
-                    logger.info(f'Experiment init: database_name: {database_name}, hidden_channels: {hidden_channels}, num_layers: {num_layers}, p_dropout: {p_dropout}.')
-
-                    output = run_heterognn_splitted_v2(database_name, 
-                                    heterodata_train=heterodata_pbg_train, 
-                                    heterodata_val=heterodata_pbg_val,
-                                    heterodata_test=heterodata_pbg_test,
-                                    hidden_channels=hidden_channels,
-                                    num_layers=num_layers,
-                                    p_dropout=p_dropout,
-                                    num_epochs=num_epochs, 
-                                    patience=patience,
-                                    verbose=verbose)
-                    time_end = timeit.default_timer()
-                    elapsed_time = round((time_end - time_start) * 10 ** 0, 3)
-                    output_list = [database_name] + [hidden_channels, num_layers, p_dropout] + list(output) + [elapsed_time]
-                    row = pd.Series(output_list, index=df.columns)
-                    df = df.append(row,ignore_index=True) 
-                    
-                    logger.info(f'Experiment finished: database_name: {output_list[0]}, hidden_channels: {output_list[1]}, num_layers: {output_list[2]}, p_dropout: {output_list[3]}, loss: {output_list[4]:.4f}, f1: {output_list[5]:.4f}, acc: {output_list[6]:.4f}, epochs: {output_list[7]}, elapsed_time: {output_list[8]}')
-        return df
-    
-    except Exception as e:
-        logger.info(f'Error during experiment: \n{e}')
-
-
-def run_heterognn_splitted_v3(database_name,
+def run_heterognn_splitted(database_name,
+                           description, 
                            heterodata_train,
                            heterodata_test,
                            hidden_channels,
                            num_layers,
                            p_dropout,
                            num_epochs, 
-                           patience,
                            aggr,
+                           version, 
+                           loss_function, 
                            verbose=False):
 
     try:
@@ -784,105 +659,56 @@ def run_heterognn_splitted_v3(database_name,
                           out_channels=heterodata_train['source']['num_classes'],
                           num_layers=num_layers,
                           p_dropout=p_dropout,
-                          aggr=aggr)
+                          aggr=aggr, 
+                          version=version)
         min_loss = np.inf
         max_acc = 0
-        loss_array = []
+        patience = int(num_epochs/2)
         epoch_convergence = 0
-        block_eval_loss = 10
 
         output_list = []
-        df = pd.DataFrame(columns=['database_name', 'hidden_channels', 'num_layers', 'p_dropout', 'loss_train', 'loss_val', 'micro_val', 'acc_val', 'epoch', 'epoch_convergence', 'elapsed_time'])
+        df = pd.DataFrame(columns=['database_name', 'description', 'hidden_channels', 'num_layers', 'p_dropout', 'loss_function', 'version', 'loss_train', 'micro_train', 'acc_train', 'loss_test', 'micro_test', 'acc_test', 'epoch', 'epoch_convergence', 'elapsed_time'])
 
-        model_name = f"model_{database_name}_hid_{hidden_channels}_layers_{num_layers}_pdrop_{p_dropout}".replace("=", "_").replace(" ", "_")
+        model_name = f"model_{database_name}_{description}_hid_{hidden_channels}_layers_{num_layers}_pdrop_{p_dropout}".replace("=", "_").replace(" ", "_")
 
-        for epoch in trange(num_epochs, disable=not verbose):
-            loss_train = train_model(model=model, train_dataset=heterodata_train, lr=0.001, weight_decay=5e-4)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
 
-            micro_train, acc_train, _ = test_model(model, heterodata_train)
-            micro_val, acc_val, loss_val = test_model(model, heterodata_test)
-            
-            loss_array.append(loss_train)
-            if loss_train <= min_loss and acc_train >= max_acc:
+        for epoch in trange(num_epochs):
+            loss_train, micro_train, acc_train = train_model(model=model, train_dataset=heterodata_train, optimizer=optimizer, loss_function=loss_function)
+            loss_test, micro_test, acc_test = test_model(model, heterodata_test, loss_function=loss_function)
+
+            if loss_train <= min_loss and acc_test >= max_acc:
                 min_loss = loss_train
-                max_acc = acc_train
+                max_acc = acc_test
                 best_model = model
+                best_loss_test = loss_test
+                best_micro_test = micro_test
+                best_acc_test = acc_test
                 epoch_convergence = epoch
-                if verbose:
-                    logger.info(f'Best model updated at epoch {epoch}.')
-                    logger.info(f"[TRAIN SET] epoch: {epoch}, loss: {loss_train:.4f}, f1: {micro_train:.4f}, acc: {acc_train:.4f}")
-                    logger.info(f"[TEST. SET] epoch: {epoch}, loss: {loss_val:.4f}, f1: {micro_val:.4f}, acc: {acc_val:.4f}")
-
 
             time_end = timeit.default_timer()
             elapsed_time = round((time_end - time_start) * 10 ** 0, 3)
-            output_list = [database_name, hidden_channels, num_layers, p_dropout, loss_train, loss_val, micro_val, acc_val, epoch, epoch_convergence, elapsed_time]
+            output_list = [database_name, description, hidden_channels, num_layers, p_dropout, loss_function, version, loss_train, micro_train, acc_train, loss_test, micro_test, acc_test, epoch, epoch_convergence, elapsed_time]
             row = pd.Series(output_list, index=df.columns)
             df = df.append(row,ignore_index=True) 
-            if epoch >= patience:
-                tmp_loss_array = loss_array[-block_eval_loss+1: -1]
-                if loss_train > np.mean(tmp_loss_array).item():
-                    break
 
-        micro_test, acc_test, loss_test = test_model(best_model, heterodata_test)
-        logger.info(f"[TEST SET] Optimal solution: epoch: {epoch}, loss: {loss_test:.4f}, f1: {micro_test:.4f}, acc: {acc_test:.4f}")
+            if verbose:
+                logger.info(f'Loss (train): {loss_train:.4f}, Loss (test): {loss_test:.4f}, F1 (train): {micro_train:.4f}, F1 (test): {micro_test:.4f}')
+
+            if (epoch >= patience or acc_train > 0.99) and (epoch - epoch_convergence) > 500:
+                logger.info(f'Early stopping at epoch {epoch}.')
+                break
+
+        logger.info(f'Optimal sol. database {database_name}: \nGNN ver. {version}, lf. {loss_function} \nepoch: {epoch_convergence}/{num_epochs}, loss (test): {best_loss_test:.4f}, f1 (test): {best_micro_test:.4f}, acc (test): {best_acc_test:.4f}')
         
         df.to_csv(f'./csv_objects/training/{model_name}.csv', sep=';', decimal=',', index=False)
         
         with open(f'./pickle_objects/models/{model_name}.pickle', 'wb') as f:
             pickle.dump(best_model, f, pickle.HIGHEST_PROTOCOL)
-        return loss_test, micro_test, acc_test, epoch_convergence+1
+        return best_loss_test, best_micro_test, best_acc_test, epoch_convergence
     
     except Exception as e:
         logger.error(f'Error training model on heterodata: \n {e}')
 
 
-
-def experiment_gnn_v3(database_name, 
-                        heterodata_pbg_train, 
-                        heterodata_pbg_test, 
-                        num_epochs, 
-                        patience,
-                        hidden_channels_list,
-                        num_layers_list,
-                        p_dropout_list,
-                        aggr,
-                        verbose):
-    try:
-        import warnings
-        import timeit 
-
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        output_list = []
-        df = pd.DataFrame(columns=['database_name', 'hidden_channels', 'num_layers', 'p_dropout', 'loss', 'f1', 'acc', 'epochs', 'elapsed_time'])
-
-        for hidden_channels in hidden_channels_list:
-            for num_layers in num_layers_list:
-                for p_dropout in p_dropout_list:
-                    time_start = timeit.default_timer()
-
-                    logger.info(f'Experiment init: database_name: {database_name}, hidden_channels: {hidden_channels}, num_layers: {num_layers}, p_dropout: {p_dropout}.')
-
-                    output = run_heterognn_splitted_v3(database_name, 
-                                    heterodata_train=heterodata_pbg_train, 
-                                    heterodata_test=heterodata_pbg_test,
-                                    hidden_channels=hidden_channels,
-                                    num_layers=num_layers,
-                                    p_dropout=p_dropout,
-                                    num_epochs=num_epochs, 
-                                    patience=patience,
-                                    aggr=aggr,
-                                    verbose=verbose)
-                    time_end = timeit.default_timer()
-                    elapsed_time = round((time_end - time_start) * 10 ** 0, 3)
-                    output_list = [database_name] + [hidden_channels, num_layers, p_dropout] + list(output) + [elapsed_time]
-                    row = pd.Series(output_list, index=df.columns)
-                    df = df.append(row,ignore_index=True) 
-                    
-                    logger.info(f'Experiment finished: database_name: {output_list[0]}, hidden_channels: {output_list[1]}, num_layers: {output_list[2]}, p_dropout: {output_list[3]}, loss: {output_list[4]:.4f}, f1: {output_list[5]:.4f}, acc: {output_list[6]:.4f}, epochs: {output_list[7]}, elapsed_time: {output_list[8]}')
-        return df
-    
-    except Exception as e:
-        logger.info(f'Error during experiment: \n{e}')
 

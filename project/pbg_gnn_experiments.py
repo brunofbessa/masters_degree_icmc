@@ -1,81 +1,88 @@
 from functions import *
-import pickle
-import glob
-
 logger = get_logger('log_experiments')
-
 seed_everything(seed=42)
 
-def run_experiment_gnn(database_name, K, hidden_channels_list, num_layers_list, p_dropout_list, patience):
+def run_experiment_gnn(database_name, 
+                       K, 
+                       hidden_channels, 
+                       num_layers, 
+                       p_dropout, 
+                       Kc,
+                       docf, 
+                       docst,
+                       loss_function, 
+                       version,
+                       num_epochs):
+    
     try:
-
-        logger.info(f'Running experiments on {database_name} K={K}')
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_test.pickle', 'rb') as f:
-            heterodata_pbg_test = pickle.load(f)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_train.pickle', 'rb') as f:
-            heterodata_pbg_train = pickle.load(f)
-        with open(f'./pickle_objects/preprocess/heterodata_pbg_{database_name}_k{K}_val.pickle', 'rb') as f:
-            heterodata_pbg_val = pickle.load(f)
-
-        df_experiment = experiment_gnn(database_name=f'{database_name} K={K}',
-                                heterodata_pbg_train=heterodata_pbg_train,
-                                heterodata_pbg_val=heterodata_pbg_val,
-                                heterodata_pbg_test=heterodata_pbg_test,
-                                hidden_channels_list=hidden_channels_list,
-                                num_layers_list=num_layers_list,
-                                p_dropout_list=p_dropout_list,
-                                num_epochs=2*patience, 
-                                patience=patience,
-                                verbose=False)
         
-        with open(f'./pickle_objects/experiments/df_experiment_{database_name}_k{K}.pickle', 'wb') as f:
-            pickle.dump(df_experiment, f, pickle.HIGHEST_PROTOCOL)
+        heterodata_description = f'{database_name}_K_{K}_Kc_{Kc}_docf_{str(docf)}_docst_{str(docst)}'
+        with open(f'./pickle_objects/preprocess/{database_name}/heterodata_pbg_{heterodata_description}_train.pickle', 'rb') as f:
+            heterodata_train = pickle.load(f)
+        with open(f'./pickle_objects/preprocess/{database_name}/heterodata_pbg_{heterodata_description}_test.pickle', 'rb') as f:
+            heterodata_test = pickle.load(f)
+                        
+        logger.info(f'Loaded preprocessed heterographs {heterodata_description}.')
 
-        logger.info(f'Executed experiments on {database_name} K={K}. Results saved as pickle objects.')
+        training_description = f'{heterodata_description}_act_{loss_function}_ver_{version}'
+
+        df_experiment = run_heterognn_splitted(database_name=database_name,
+                           description=training_description, 
+                           heterodata_train=heterodata_train,
+                           heterodata_test=heterodata_test,
+                           hidden_channels=hidden_channels,
+                           num_layers=num_layers,
+                           p_dropout=p_dropout,
+                           num_epochs=num_epochs, 
+                           aggr='sum',
+                           version=version, 
+                           loss_function=loss_function, 
+                           verbose=True)
+        
+        loss_test, micro_test, acc_test, epoch_convergence = df_experiment
+        df = pd.DataFrame(columns=['database_name', 'K', 'Kc', 'docf', 'docst', 'hidden_channels', 'num_layers', 'p_dropout', 'activation', 'version', 'loss_test', 'micro_test', 'acc_test', 'epoch_convergence'])
+        output_list = [database_name, K, Kc, docf, docst, hidden_channels, num_layers, p_dropout, activation, version, loss_test, micro_test, acc_test, epoch_convergence]
+        row = pd.Series(output_list, index=df.columns)
+        df = df.append(row,ignore_index=True) 
+        
+#         with open('./csv_objects/summary/experiments_summary.csv', 'a') as f:
+#             df.to_csv(f, mode='a', sep=';', decimal=',', index=False, header=f.tell()==0)
+        
+        logger.info(f'Executed experiments on {database_name} {training_description}. Results saved as pickle objects.')
 
     except Exception as e:
         logger.info(f'Error occurred: \n{e}')
-        raise
+        pass
 
 if __name__ == '__main__':
 
-    databse_list = ['reuters', 'bbcnews', 'classic4']
-    K_values = [100 , 50, 10]
-    hidden_channels_list = [100, 50, 10]
-    num_layers_list = [2, 3, 4]
-    p_dropout_list = [0.0]
-    patience = 200
+    databse_list = ['classic4']#['20ng', '20ng', 'bbcnews', 'reuters', 'classic4', 'nsf', 'webkb', 'agnews']
+    K = 50
+    hidden_channels = 400
+    num_layers = 3
+    p_dropout = 0.2
+    Kc = 400
+    docf = 'replace'
+    docst = 0.5
+    num_epochs = 1500
+    loss_function_list = ['fl']#['ce', 'fl']
+    gnn_version_list = [1, 2, 3, 4]
+    
 
     logger.info('Running experiments on datasets with heterographs and GNNs.')
 
     for database_name in databse_list:
-        for K in K_values:
-            run_experiment_gnn(database_name, K, hidden_channels_list, num_layers_list, p_dropout_list, patience)
+        for loss_function in loss_function_list:
+            for version in gnn_version_list:
+                run_experiment_gnn(database_name, 
+                                  K, 
+                                  hidden_channels, 
+                                  num_layers, 
+                                  p_dropout, 
+                                  Kc,
+                                  docf, 
+                                  docst,
+                                  loss_function, 
+                                  version,
+                                  num_epochs)
 
-
-dataframes_path_list = []
-for file in glob.glob('pickle_objects/experiments/*.pickle'):
-    dataframes_path_list.append(file)
-
-df_all_experiments = pd.DataFrame()
-
-for df_path in dataframes_path_list:
-    
-    with open(df_path, 'rb') as f:
-        df = pickle.load(f)
-            
-    if df_path == dataframes_path_list[0]:
-        df_all_experiments = df
-    else:
-        df_all_experiments= df_all_experiments.append(df,ignore_index=True)
-    
-df_all_experiments['database_name_aux'] = df_all_experiments['database_name']
-df_all_experiments['K'] = df_all_experiments['database_name_aux'].str.replace('.*K=', '').str.replace(' ', '')
-df_all_experiments["database_name"] = df_all_experiments["database_name_aux"].str.replace("K=.*", "").str.replace(' ', '')
-
-df_all_experiments = df_all_experiments.rename(columns={'database_name': 'database', 'K': 'K_z', 'hidden_channels': 'num. hidden channels'})
-
-df_all_experiments = df_all_experiments.drop(["database_name_aux"], axis=1)
-
-with open("./pickle_objects/experiments/df_all_experiments.pickle", "wb") as f:
-    pickle.dump(df_all_experiments, f, pickle.HIGHEST_PROTOCOL)
