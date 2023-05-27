@@ -17,6 +17,7 @@ from nltk.stem.wordnet import WordNetLemmatizer
 from nltk.tokenize import RegexpTokenizer
 from sklearn.datasets import fetch_20newsgroups
 from sklearn.model_selection import train_test_split
+from sklearn.base import TransformerMixin, BaseEstimator
 from logger import get_logger
 import pandas as pd
  
@@ -340,3 +341,34 @@ def text_preproc(docs):
     # create strings
     docs = [' '.join(doc) for doc in docs]
     return docs
+
+
+class SemiLabelEncoder(TransformerMixin, BaseEstimator):
+
+    def __init__(self, unlabeled_value=-1, one_class_name=None, one_class_idx=-1):
+        self.unlabeled_value = unlabeled_value
+        self.map_cls = {unlabeled_value: -1}
+        self.inv_map_cls = {-1: unlabeled_value}
+        self.one_class_idx = one_class_idx
+        self.one_class_name = one_class_name
+
+    def fit(self, Y):
+        Y = set(Y)
+        if self.one_class_idx != -1:
+            self.map_cls[self.one_class_name] = self.one_class_idx
+            self.inv_map_cls[self.one_class_idx] = self.one_class_name
+        i = 0
+        for y in Y:
+            if y != self.unlabeled_value and y not in self.map_cls.keys():
+                self.map_cls[y] = i
+                self.inv_map_cls[i] = y
+                i = i+1
+        #print(self.map_cls)
+        return self
+
+    def transform(self, Y):
+        return np.array([self.map_cls[y] for y in Y])
+
+    def inverse_transform(self, Y):
+        return {y: self.inv_map_cls.get(y, y) for y in Y}
+

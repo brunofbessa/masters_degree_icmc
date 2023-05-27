@@ -2,7 +2,7 @@ from logger import get_logger
 
 import torch
 import torch.nn.functional as F
-from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv, Linear
+from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv, GATv2Conv, Linear
 from focal_loss.focal_loss import FocalLoss
 from sklearn.metrics import f1_score, accuracy_score, precision_score
 
@@ -20,26 +20,18 @@ def get_conv(hidden_channels, aggr, version=1):
 
         elif version == 2:
             conv = HeteroConv({
-                ('source', 'edge', 'source'): SAGEConv((-1, -1), hidden_channels), 
-                ('source', 'edge', 'target'): SAGEConv((-1, -1), hidden_channels),
-                ('target', 'rev_edge', 'source'): SAGEConv((-1, -1), hidden_channels)
+                ('source', 'edge', 'target'): GATConv((-1, -1), hidden_channels),
+                ('target', 'rev_edge', 'source'): GATConv((-1, -1), hidden_channels)
             }, aggr=aggr)
 
         elif version == 3:
             conv = HeteroConv({
-                ('source', 'edge', 'source'): GCNConv(-1, hidden_channels), 
-                ('source', 'edge', 'target'): SAGEConv((-1, -1), hidden_channels),
-                ('target', 'rev_edge', 'source'): SAGEConv((-1, -1), hidden_channels)
-            }, aggr=aggr)
-
-        elif version == 4:
-            conv = HeteroConv({
-                ('source', 'edge', 'source'): GATConv((-1, -1), hidden_channels, add_self_loops=False), 
-                ('source', 'edge', 'target'): SAGEConv((-1, -1), hidden_channels),
-                ('target', 'rev_edge', 'source'): SAGEConv((-1, -1), hidden_channels)
+                ('source', 'edge', 'target'): GATv2Conv((-1, -1), hidden_channels),
+                ('target', 'rev_edge', 'source'): GATv2Conv((-1, -1), hidden_channels)
             }, aggr=aggr)
 
         return conv
+
 
     except Exception as e:
         logger.info(f'Error creating Heteroconv layer: \n {e}')       

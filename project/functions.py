@@ -7,7 +7,8 @@ import logging
 import pickle
 import re
 
-from random import sample
+from random import sample, shuffle
+from sklearn.utils import shuffle as shuffle_df
 from tqdm import trange
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation as LDA
@@ -15,11 +16,13 @@ from sklearn.decomposition import NMF
 from sklearn.ensemble import RandomForestClassifier as RFC
 from sklearn.pipeline import Pipeline
 from sklearn.datasets import fetch_20newsgroups
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from util import SimplePreprocessing
 from upbg import UPBG
+from pbg import PBG
+from tpbg import TPBG
 from gnn import *
 from nltk.corpus import reuters
 from dataclasses import dataclass
@@ -44,25 +47,25 @@ class Database:
     target_names: list
     data: list
     target: np.array
+    is_train: np.array
     filenames: list
     DESCR: str
         
-    def __init__(self, target_names: list, data: list, target: np.array, filenames: list, DESCR: str=""):
+    def __init__(self, target_names: list, data: list, target: np.array, is_train: np.array, filenames: list, DESCR: str=""):
         self.target_names = target_names
         self.data = data
         self.target = target
+        self.is_train = is_train
         self.filenames = filenames
         self.DESCR = DESCR
 
-       
-def load_data(database_name, subset):
+
+def load_data_bkp(database_name, subset):
     
     try:
     
         if database_name in ['20newsgroups', '20ng']:
-            categories = ['alt.atheism', 'talk.religion.misc', 'comp.graphics', 'sci.space', 'misc.forsale']
-            database = fetch_20newsgroups(subset=subset, remove=('headers', 'footers', 'quotes'), 
-                                      categories=categories)
+            database = fetch_20newsgroups(subset=subset, remove=('headers', 'footers', 'quotes'))
             target_names = database.target_names
             data = database.data
             target = database.target
@@ -86,8 +89,8 @@ def load_data(database_name, subset):
                     data.append(reuters.raw(doc_id))
                     target.append(idx)
                     filenames.append(doc_id)
-            target = np.array(target)
 
+            target = np.array(target)
             database = Database(target_names, data, target, filenames, DESCR)
         
         elif database_name in ['bbc_news', 'bbcnews', 'bbc']:
@@ -110,6 +113,7 @@ def load_data(database_name, subset):
                 data.append(row['text'])
                 target.append(mapping_categories[row['category']])
 
+            target = np.array(target)
             database = Database(target_names, data, target, filenames, DESCR)
 
         elif database_name in ['ag_news', 'agnews']:
@@ -133,6 +137,7 @@ def load_data(database_name, subset):
                 data.append(row['text'])
                 target.append(mapping_categories[row['category']])
             
+            target = np.array(target)
             database = Database(target_names, data, target, filenames, DESCR)
         
         elif database_name == 'classic4':
@@ -155,11 +160,11 @@ def load_data(database_name, subset):
                 data.append(row['text'])
                 target.append(mapping_categories[row['category']])
 
+            target = np.array(target)
             database = Database(target_names, data, target, filenames, DESCR) 
                                     
         elif database_name == 'nsf':
             
-            selected_target_names = ['ecology', 'economics', 'statistics', 'politic', 'math']
             dataframe = pd.read_csv('data/nsf.csv', sep=',')
 
             if subset == 'train':
@@ -179,6 +184,7 @@ def load_data(database_name, subset):
                 data.append(row['text'])
                 target.append(mapping_categories[row['category']])
 
+            target = np.array(target)
             database = Database(target_names, data, target, filenames, DESCR)     
         
         elif database_name == 'webkb':
@@ -201,6 +207,7 @@ def load_data(database_name, subset):
                 data.append(row['text'])
                 target.append(mapping_categories[row['category']])
 
+            target = np.array(target)
             database = Database(target_names, data, target, filenames, DESCR)     
         
         else:
@@ -209,6 +216,387 @@ def load_data(database_name, subset):
 
 
         logger.info(f'Loaded data for {database_name} {subset}. {len(target_names)} classes: {str(target_names)}. Number of documents: {len(data)}.')                                    
+        return database
+    
+    except Exception as e:
+        logger.error(f"Error getting data: \n{e}")
+        raise
+ 
+
+def load_data(database_name):
+    
+    try:
+    
+        if database_name in ['20newsgroups', '20ng']:
+            categories = ['alt.atheism', 'talk.religion.misc', 'comp.graphics', 'sci.space', 'rec.motorcycles']
+            database_train = fetch_20newsgroups(subset='train', remove=('headers', 'footers', 'quotes'), categories=categories)
+            database_test = fetch_20newsgroups(subset='test', remove=('headers', 'footers', 'quotes'), categories=categories)
+            database_train.is_train = np.ones(len(database_train.data))
+            database_test.is_train = np.zeros(len(database_test.data))
+
+            target_names = database_train.target_names
+            data = database_train.data + database_test.data
+            target = np.append(database_train.target, database_test.target)
+            is_train = np.append(database_train.is_train, database_test.is_train)
+            filenames = ''
+            DESCR = database_train.DESCR
+
+            ind_list = [i for i in range(len(data))]
+            shuffle(ind_list)
+            data = [data[index] for index in ind_list]
+            target = target[ind_list]
+            is_train = is_train[ind_list]
+
+            database = Database(target_names, data, target, is_train, filenames, DESCR)
+            
+        elif database_name == 'reuters':  
+            documents = reuters.fileids()
+            proportion = 1
+            documents = sample(documents, int(proportion * len(documents)))
+            documents_subset = [d for d in documents if d.startswith(subset)]
+            
+            target_names = ['acq', 'alum', 'barley', 'bop', 'carcass']
+            data = []
+            target = []
+            filenames = []
+            DESCR = '''The copyright for the text of newswire articles and Reuters annotations in the Reuters-21578 collection resides with Reuters Ltd. Reuters Ltd. and Carnegie Group, Inc. have agreed to allow the free distribution of this data *for research purposes only*. If you publish results based on this data set, please acknowledge its use, refer to the data set by the name 'Reuters-21578, Distribution 1.0', and inform your readers of the current location of the data set.'''
+            for idx, element in enumerate(target_names):
+                for doc_id in documents_subset:
+                    data.append(reuters.raw(doc_id))
+                    target.append(idx)
+                    filenames.append(doc_id)
+
+            target = np.array(target)
+            database = Database(target_names, data, target, filenames, DESCR)
+        
+        elif database_name in ['bbc_news', 'bbcnews', 'bbc']:
+            dataframe = pd.read_csv('data/bbc_news.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+            
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = '''All rights, including copyright, in the content of the original articles are owned by the BBC. Consists of 2225 documents from the BBC news website corresponding to stories in five topical areas from 2004-2005. Class Labels: 5 (business, entertainment, politics, sport, tech).'''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)
+
+        elif database_name in ['ag_news', 'agnews']:
+            dataframe_train, dataframe_test = pd.read_csv('data/ag_news_csv/train.csv', sep=',', header=None, names=['category', 'title', 'text'])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            target_names_dict = {1: 'World', 2: 'Sports', 3: 'Business', 4: 'Sci/Tech'}
+            dataframe['category'] = dataframe['category'].map(target_names_dict)
+            
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = '''The AG's news topic classification dataset is constructed by choosing 4 largest classes from the original corpus. Each class contains 30,000 training samples and 1,900 testing samples. The total number of training samples is 120,000 and testing 7,600.'''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+            
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)
+        
+        elif database_name == 'classic4':
+            dataframe = pd.read_csv('data/classic4.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = '''Classic4 collection [Research, 2010] are composed by 4 distinct collections: CACM (titles and abstracts from the journal Communications of the ACM), CISI (information retrieval papers), CRANFIELD (aeronautical system papers), and MEDLINE (medical journals).'''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR) 
+                                    
+        elif database_name == 'nsf':          
+            dataframe = pd.read_csv('data/nsf.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            categories = ['ecology', 'oceanography', 'politic', 'theory', 'data']
+            dataframe = dataframe.loc[dataframe['category'].isin(categories)]
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = '''NSF (National Science Foundation) collection [Pazzani and Meyers, 2003] are com- posed by abstracts of grants awarded by the National Science Foundation8 between 1999 and August 2003.'''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)  
+        
+        elif database_name == 'webkb': 
+            #reduce classes ['course', 'student', 'other', 'faculty', 'project', 'staff', 'department']
+            dataframe = pd.read_csv('data/webkb.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            categories = ['course', 'student', 'other', 'staff', 'department']
+            dataframe = dataframe.loc[dataframe['category'].isin(categories)]
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = '''WebKB colleciton is composed by web pages collected from computer science de- partments of various universities in January 1997 by the World Wide Knowledge Base15 (WebKb) project of the CMU Text Learning Group.'''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)    
+
+        elif database_name == 'cstr':
+            dataframe = pd.read_csv('data/CSTR.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = ''' '''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)    
+      
+        elif database_name == 'dmoz_computers': 
+            #reduce classes: ['Software', 'Computer', 'Programming', 'Mobile', 'Multimedia', 'Robotics', 'Hardware', 'Graphics', 'Data', 'Artificial', 'Internet', 'Companies', 'Systems', 'CAD', 'Education', 'Security', 'Open', 'Consultants']
+            dataframe = pd.read_csv('data/Dmoz-Computers.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            categories = ['Software', 'Hardware', 'Graphics', 'Education', 'Security']
+            dataframe = dataframe.loc[dataframe['category'].isin(categories)]
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = ''' '''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)    
+      
+        elif database_name == 'dmoz_health': 
+            #reduce classes: ['Senior', 'Reproductive', 'Public', 'Mental', 'Professions', 'Medicine', 'Pharmacy', 'Alternative', 'Nutrition', 'Addictions', 'Animal', 'Conditions', 'Nursing']
+            dataframe = pd.read_csv('data/Dmoz-Health.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            categories = ['Medicine', 'Pharmacy', 'Public', 'Mental', 'Animal']
+            dataframe = dataframe.loc[dataframe['category'].isin(categories)]
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = ''' '''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)  
+
+        elif database_name == 'dmoz_science': 
+            #reduce classes: ['Chemistry', 'Earth', 'Math', 'Agriculture', 'Physics', 'Social', 'Environment', 'Instruments', 'Science', 'Biology', 'Technology', 'Astronomy']
+            dataframe = pd.read_csv('data/Dmoz-Science.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            categories = ['Chemistry', 'Earth', 'Environment', 'Instruments', 'Science']
+            dataframe = dataframe.loc[dataframe['category'].isin(categories)]
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = ''' '''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)   
+
+        elif database_name == 'dmoz_sports': 
+            #reduce classes: ['Hockey', 'Fencing', 'Basketball', 'Martial', 'Track', 'Water', 'Tennis', 'Paintball', 'Running', 'Cycling', 'Winter', 'Soccer', 'Wrestling', 'Golf', 'Football', 'Softball', 'Gymnastics', 'Baseball', 'Skating', 'Lacrosse', 'Strength', 'Motorsports', 'Bowling', 'Volleyball', 'Flying', 'Cricket', 'Equestrian']
+            dataframe = pd.read_csv('data/Dmoz-Sports.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            categories = ['Wrestling', 'Golf', 'Paintball', 'Running', 'Cycling']
+            dataframe = dataframe.loc[dataframe['category'].isin(categories)]
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = ''' '''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)   
+
+        elif database_name == 're8':
+            dataframe = pd.read_csv('data/re8.csv', sep=',')
+            dataframe_train, dataframe_test = train_test_split(dataframe, test_size=0.4, random_state=1234, stratify=dataframe[['category']])
+            dataframe_train['is_train'] = 1.0
+            dataframe_test['is_train'] = 0.0
+
+            dataframe = pd.concat([dataframe_train, dataframe_test])
+            dataframe = shuffle_df(dataframe)
+
+            target_names = dataframe["category"].unique().tolist()
+            mapping_categories = {}
+            for idx, element in enumerate(target_names):
+                mapping_categories[element] = idx
+            data = []
+            target = []
+            is_train = []
+            filenames = None
+            DESCR = ''' '''
+            for index, row in dataframe.iterrows():
+                data.append(row['text'])
+                target.append(mapping_categories[row['category']])
+                is_train.append(row['is_train'])
+
+            target = np.array(target)
+            is_train = np.array(is_train)
+            database = Database(target_names, data, target, is_train, filenames, DESCR)   
+
+        else:
+             logger.info(f'Database name provided ({database_name}) is not valid.')
+             raise  
+
+
+        logger.info(f'Loaded data for {database_name}. {len(database.target_names)} classes: {str(database.target_names)}. Number of documents: {len(database.data)}.')                                    
         return database
     
     except Exception as e:
@@ -311,6 +699,70 @@ def load_pbg_test(database_name, pbg_model_trained=None, K=100, disable_tqdm=Tru
     
     except Exception as e:
         logger.info(f'Error fitting pbg for {database_name}: \n {e}')    
+
+def run_tpbg_on_dataset(database_name):
+
+    try:
+    
+        database = load_data(database_name=database_name)
+        data_preprocessed = SimplePreprocessing().transform(database.data)
+        vectorizer = TfidfVectorizer()
+        data_vectorized_fit = vectorizer.fit_transform(data_preprocessed)
+        y = database.target
+        y_train_real = y.copy()
+        
+        y[database.is_train==0] = -1
+        
+        def eval(self):        
+            self.create_transduction()    
+            y_predicted = self.transduction_[database.is_train==0]    
+            y_real = y_train_real[database.is_train==0]    
+            logger.info(f'Classification_report for TPBG on {database_name}:\n {str(classification_report(y_predicted, y_real, digits=4))}')
+            
+        K = len(database.target_names)
+        tpbg = TPBG(K, alpha=0.05, beta=0.0001, local_max_itr=30,
+                         global_max_itr=5, local_threshold=1e-6, global_threshold=1e-6,
+                         save_interval=-1, 
+                         feature_names=vectorizer.get_feature_names_out(), 
+                         target_name=database.target_names, 
+                         silence=True, eval_func=eval)   
+        tpbg.fit(data_vectorized_fit, y)
+        eval(tpbg)
+        logger.info(f'Loaded TPBG for {database_name} with K={K}.')
+        
+        # doc2vec embeddings
+        sentences = [re.findall("[a-z\-]+", s.lower()) for s in data_preprocessed]
+        documents = [TaggedDocument(doc, [i]) for i, doc in enumerate(sentences)]
+        doc2vec_model = Doc2Vec(documents, vector_size=400, window=10, min_count=1, workers=4)
+        doc2vec_model.train(documents, total_examples=doc2vec_model.corpus_count, epochs=doc2vec_model.epochs)
+        document_features = doc2vec_model.dv.vectors
+        logger.info(f'Computed 400 document features with doc2vec.')
+
+        tpbg.document_features = document_features
+        tpbg.is_train = database.is_train
+        tpbg.n_class = len(database.target_names)
+
+        # Final embeddings
+        tpbg_train = TPBG(K)
+        tpbg_train.log_A = tpbg.log_A[database.is_train==1]
+        tpbg_train.log_B = tpbg.log_B
+        tpbg_train.document_features = tpbg.document_features[database.is_train==1]
+        tpbg_train.Xc = tpbg.X[database.is_train==1]
+        tpbg_train.y = y_train_real[database.is_train==1]
+        tpbg_train.n_class = len(database.target_names)
+
+        tpbg_test = TPBG(K)
+        tpbg_test.log_A = tpbg.log_A[database.is_train==0]
+        tpbg_test.log_B = tpbg.log_B
+        tpbg_test.document_features = tpbg.document_features[database.is_train==0]
+        tpbg_test.Xc = tpbg.X[database.is_train==0]
+        tpbg_test.y = y_train_real[database.is_train==0]
+        tpbg_test.n_class = len(database.target_names)
+        
+        return tpbg_train, tpbg_test
+
+    except Exception as e:
+        logger.info(f'Error fitting TPBG for {database_name}: \n {e}')
 
 def run_pbg_on_dataset(database_name, K, K_cosine=0, disable_tqdm=True):
 
@@ -460,7 +912,7 @@ def get_heterograph_pbg(pbg):
     except Exception as e:
         logger.info(f'Error heterograph for pbg.\n{e}')
 
-def get_heterograph_pbg_features(pbg, doc_features=None, doc_similarity_thres=0.9):
+def get_heterograph_pbg_features(pbg, doc_features=None):
     try:
 
         from torch_geometric.data import HeteroData
@@ -476,25 +928,13 @@ def get_heterograph_pbg_features(pbg, doc_features=None, doc_similarity_thres=0.
             _source_x = torch.from_numpy(pbg.log_A).float()
 
         _target_x = torch.from_numpy(pbg.log_B).float()
-
         _adjacency_matrix = pbg.Xc.todense()
-        # _num_rows, _num_columns = _adjacency_matrix.shape  
-        # _from_node = []
-        # _to_node = []
         
         logger.info(f'Creating source-target edges.')
 
         idx = np.where(_adjacency_matrix >0)
         _from_node = np.array(idx[0])
         _to_node = np.array(idx[1])
-        # for row in trange(_num_rows):
-        #     for column in range(_num_columns):
-        #         if _adjacency_matrix[row, column] > 0:
-        #             _from_node.append(row)
-        #             _to_node.append(column)
-
-        # _from_node = np.array(_from_node)
-        # _to_node = np.array(_to_node)
         
         _edge_index = torch.concat((torch.from_numpy(_from_node).long(), 
                                     torch.from_numpy(_to_node).long()))
@@ -502,42 +942,11 @@ def get_heterograph_pbg_features(pbg, doc_features=None, doc_similarity_thres=0.
         _y = torch.from_numpy(pbg.y).long()
 
         
-        # Build document-document edge_list based on cosine similarity  
-        if doc_similarity_thres is not None:
-            try:
-                logger.info(f'Attempt to calculate cosine similarities for all nodes.')
-                #all_sims = cosine_similarity(pbg.document_features)
-                all_sims = cosine_similarity_top_k(pbg.document_features, top_k=100)
-                logger.info(f'Calculated cosine similarities for source node featues.')
-                
-                logger.info(f'Computing source-source edges for cosine similarity nodes.')
-                idx = np.where(all_sims >= doc_similarity_thres)
-                _from_node = np.array(idx[0])
-                _to_node = np.array(idx[1])
-
-                _edge_index_document = torch.concat((torch.from_numpy(_from_node).long(), torch.from_numpy(_to_node).long()))
-                _edge_index_document = _edge_index_document.reshape(-1, _from_node.shape[0]).long()
-                
-                heterodata = HeteroData(
-                    {'source': {'x': _source_x, 'y': _y},
-                    'target': {'x': _target_x}},
-                    source__edge__target={'edge_index': _edge_index},
-                    source__edge__source={'edge_index': _edge_index_document}
-                )
-            except Exception as e:
-                logger.info(f'Could not create edges for source-source nodes: \n {e}')
-                heterodata = HeteroData(
-                    {'source': {'x': _source_x, 'y': _y},
-                    'target': {'x': _target_x}},
-                    source__edge__target={'edge_index': _edge_index}
-                )
-
-        else:
-            heterodata = HeteroData(
-                {'source': {'x': _source_x, 'y': _y},
-                'target': {'x': _target_x}},
-                source__edge__target={'edge_index': _edge_index}
-            )
+        heterodata = HeteroData(
+            {'source': {'x': _source_x, 'y': _y},
+            'target': {'x': _target_x}},
+            source__edge__target={'edge_index': _edge_index}
+        )
         
         heterodata['source'].num_nodes = len(_source_x)
         heterodata['target'].num_nodes = len(_target_x)
@@ -671,7 +1080,7 @@ def run_heterognn_splitted(database_name,
 
         model_name = f"model_{database_name}_{description}_hid_{hidden_channels}_layers_{num_layers}_pdrop_{p_dropout}".replace("=", "_").replace(" ", "_")
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
         for epoch in trange(num_epochs):
             loss_train, micro_train, acc_train = train_model(model=model, train_dataset=heterodata_train, optimizer=optimizer, loss_function=loss_function)
@@ -693,7 +1102,7 @@ def run_heterognn_splitted(database_name,
             df = df.append(row,ignore_index=True) 
 
             if verbose:
-                logger.info(f'Loss (train): {loss_train:.4f}, Loss (test): {loss_test:.4f}, F1 (train): {micro_train:.4f}, F1 (test): {micro_test:.4f}')
+                logger.info(f'\nLoss (train): {loss_train:.4f}, Loss (test): {loss_test:.4f}, F1 (train): {micro_train:.4f}, F1 (test): {micro_test:.4f}')
 
             if (epoch >= patience or acc_train > 0.99) and (epoch - epoch_convergence) > 500:
                 logger.info(f'Early stopping at epoch {epoch}.')
@@ -709,6 +1118,3 @@ def run_heterognn_splitted(database_name,
     
     except Exception as e:
         logger.error(f'Error training model on heterodata: \n {e}')
-
-
-
