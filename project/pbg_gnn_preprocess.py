@@ -41,7 +41,7 @@ def preprocess_datasets_pbg(databse_name, docf_values, is_preproc=False):
             with open(f'{base_path}/heterodata_pbg_{database_name}_{description}_test.pickle', 'wb') as f:
                 pickle.dump(heterodata_pbg_test, f, pickle.HIGHEST_PROTOCOL)
 
-            logger.info(f'Created heterograph for TOBG on {databse_name} ({description}). Results saved as pickle objects.')
+            logger.info(f'Created heterograph for TPBG on {databse_name} ({description}). Results saved as pickle objects.')
 
     except Exception as e:
         logger.info(f'Error occurred: \n{e}')
@@ -49,7 +49,7 @@ def preprocess_datasets_pbg(databse_name, docf_values, is_preproc=False):
 
 if __name__ == '__main__':
 
-    databse_list = ['20ng', 'bbc', 'classic4', 'nsf', 'cstr', 'dmoz_computers', 'dmoz_health', 'dmoz_science', 'dmoz_sports', 're8']
+    databse_list = ['webkb']
     docf_values = [None, 'merge', 'replace']
 
     logger.info('Generating heterographs for benchmark datasets.')

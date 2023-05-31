@@ -55,9 +55,13 @@ def run_experiment_gnn(database_name,
         logger.info(f'Error occurred: \n{e}')
         pass
 
-if __name__ == '__main__':
 
-    databse_list = ['20ng', 'bbc', 'classic4', 'nsf', 'cstr', 'dmoz_computers', 'dmoz_health', 'dmoz_science', 'dmoz_sports', 're8']
+
+if __name__ == '__main__':
+    # already processed: '20ng', 'bbc', 'classic4', 'cstr', 'dmoz_computers', 'dmoz_health', 'dmoz_science', 'dmoz_sports', 're8'
+    # processed with error: 'nsf', 
+
+    databse_list = ['nsf']
     K_list = [None]
     docf_list = [None, 'merge']
     hidden_channels_list = [20, 40, 100]
