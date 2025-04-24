@@ -1,7 +1,7 @@
 # BRUNO F. BESSA MASTERS DEGREE
 
 ### Courses:
-* [MAI5002] - Fundamentals of Applied Mathematics
+* [MAI5002](masters_degree_icmc/courses/MAI5002) - Fundamentals of Applied Mathematics
 * [MAI5003] - Probability and Statistics
 * [MAI5014] - Methods on Research and Development
 * [SCC5809] - Neural Networks
@@ -18,12 +18,12 @@ Graphs are data structures proper to represent real-world objects and their rela
 
 [//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)
 
-    [MAI5002]: (courses/MAI5002)
-    [MAI5003]: (courses/MAI5003)
-    [MAI5014]: (courses/MAI5014)
-    [SCC5809]: (courses/SCC5809)
-    [SFI5904]: (courses/SFI5904)
-    [SME0130]: (courses/SME0130)
+   [MAI5002]: (courses/MAI5002)
+   [MAI5003]: (courses/MAI5003)
+   [MAI5014]: (courses/MAI5014)
+   [SCC5809]: (courses/SCC5809)
+   [SFI5904]: (courses/SFI5904)
+   [SME0130]: (courses/SME0130)
 
-    [masters dissertation]: : (Ajustada_BrunoFBessadeOliveira_Dissertacao_Mestrado_ICMC_Mecai.pdf)
-    [project source codes]: (/project)
+   [masters dissertation]: (Ajustada_BrunoFBessadeOliveira_Dissertacao_Mestrado_ICMC_Mecai.pdf)
+   [project source codes]: (/project)
