@@ -1,0 +1,25 @@
+FASTCOMMUNITY_INFERENCE_ALGORITHM
+START-----:	Wed Jan 24 10:41:50 2018
+---FILES--------
+D_IN------:	data/
+D_OUT-----:	data/
+F_IN------:	lesmis.pairs
+F_JOINS---:	lesmis-fc_secondRun.joins
+F_INFO----:	lesmis-fc_secondRun.info
+F_SUPP----:	lesmis-fc_secondRun.supp
+F_NET-----:	lesmis-fc_secondRun.wpairs
+F_GROUPS--:	lesmis-fc_secondRun.groups
+F_GDIST---:	lesmis-fc_secondRun.hist
+---NET_STATS----
+MAXID-----:	77
+NUMNODES--:	77
+NUMEDGES--:	289
+---GROUPS-------
+NUMGROUPS-:	4
+MINSIZE---:	15
+MEANSIZE--:	19.25
+MAXSIZE---:	24
+---MODULARITY---
+MAXQ------:	0.331216
+STEP------:	73
+EXIT------:	Wed Jan 24 10:41:50 2018

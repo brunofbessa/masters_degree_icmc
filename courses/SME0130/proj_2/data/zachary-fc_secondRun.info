@@ -1,0 +1,25 @@
+FASTCOMMUNITY_INFERENCE_ALGORITHM
+START-----:	Thu Sep 12 21:41:01 2019
+---FILES--------
+D_IN------:	data/
+D_OUT-----:	data/
+F_IN------:	zachary.pairs
+F_JOINS---:	zachary-fc_secondRun.joins
+F_INFO----:	zachary-fc_secondRun.info
+F_SUPP----:	zachary-fc_secondRun.supp
+F_NET-----:	zachary-fc_secondRun.wpairs
+F_GROUPS--:	zachary-fc_secondRun.groups
+F_GDIST---:	zachary-fc_secondRun.hist
+---NET_STATS----
+MAXID-----:	34
+NUMNODES--:	34
+NUMEDGES--:	78
+---GROUPS-------
+NUMGROUPS-:	2
+MINSIZE---:	17
+MEANSIZE--:	17
+MAXSIZE---:	17
+---MODULARITY---
+MAXQ------:	0.383136
+STEP------:	32
+EXIT------:	Thu Sep 12 21:41:01 2019

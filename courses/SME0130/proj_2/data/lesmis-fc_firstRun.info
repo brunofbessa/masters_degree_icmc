@@ -1,0 +1,17 @@
+FASTCOMMUNITY_INFERENCE_ALGORITHM
+START-----:	Wed Jan 24 10:41:46 2018
+---FILES--------
+D_IN------:	data/
+D_OUT-----:	data/
+F_IN------:	lesmis.pairs
+F_JOINS---:	lesmis-fc_firstRun.joins
+F_INFO----:	lesmis-fc_firstRun.info
+F_SUPP----:	lesmis-fc_firstRun.supp
+---NET_STATS----
+MAXID-----:	77
+NUMNODES--:	77
+NUMEDGES--:	289
+---MODULARITY---
+MAXQ------:	0.331216
+STEP------:	73
+EXIT------:	Wed Jan 24 10:41:46 2018

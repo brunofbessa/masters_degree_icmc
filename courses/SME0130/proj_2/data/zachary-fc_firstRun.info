@@ -1,0 +1,17 @@
+FASTCOMMUNITY_INFERENCE_ALGORITHM
+START-----:	Thu Sep 12 21:40:59 2019
+---FILES--------
+D_IN------:	data/
+D_OUT-----:	data/
+F_IN------:	zachary.pairs
+F_JOINS---:	zachary-fc_firstRun.joins
+F_INFO----:	zachary-fc_firstRun.info
+F_SUPP----:	zachary-fc_firstRun.supp
+---NET_STATS----
+MAXID-----:	34
+NUMNODES--:	34
+NUMEDGES--:	78
+---MODULARITY---
+MAXQ------:	0.383136
+STEP------:	32
+EXIT------:	Thu Sep 12 21:40:59 2019

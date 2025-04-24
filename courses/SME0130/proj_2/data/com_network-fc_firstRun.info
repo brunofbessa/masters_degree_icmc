@@ -1,0 +1,12 @@
+FASTCOMMUNITY_INFERENCE_ALGORITHM
+START-----:	Wed Jan 24 10:34:23 2018
+---FILES--------
+D_IN------:	data/
+D_OUT-----:	data/
+F_IN------:	com_network.pairs
+F_JOINS---:	com_network-fc_firstRun.joins
+F_INFO----:	com_network-fc_firstRun.info
+---NET_STATS----
+MAXID-----:	128
+NUMNODES--:	128
+NUMEDGES--:	1231

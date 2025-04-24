@@ -58,8 +58,7 @@ def run_experiment_gnn(database_name,
 
 
 if __name__ == '__main__':
-    # already processed: '20ng', 'bbc', 'classic4', 'cstr', 'dmoz_computers', 'dmoz_health', 'dmoz_science', 'dmoz_sports', 're8'
-    # processed with error: 'nsf', 
+    # already processed: '20ng', 'bbc', 'classic4', 'cstr', 'dmoz_computers', 'dmoz_health', 'dmoz_science', 'dmoz_sports', 're8', 'nsf'
 
     databse_list = ['nsf']
     K_list = [None]

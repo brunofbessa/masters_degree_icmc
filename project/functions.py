@@ -28,6 +28,7 @@ from nltk.corpus import reuters
 from dataclasses import dataclass
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from chunkdot import cosine_similarity_top_k
+from itertools import compress
 
 from logger import get_logger
 
@@ -825,40 +826,44 @@ def run_pbg_on_dataset(database_name, K, K_cosine=0, disable_tqdm=True):
         logger.info(f'Error fitting pbg for {database_name}: \n {e}')     
 
 
-
-def get_lda_train(database_name, K=100):
-    try:
-        subset='train'
-        database = load_data(database_name=database_name, subset=subset)
-        cv = CountVectorizer(max_df=0.95, min_df=2, max_features=5000, stop_words='english', ngram_range=(1, 2))
-        lda = LDA(n_components=K, max_iter=30, random_state=1, n_jobs=-1)
-        rfc = RFC(n_estimators=1000, n_jobs=-1)
-        estimators = [("cv", cv), ("lda", lda), ("rfc", rfc)]
-
-        pipe = Pipeline(estimators)
-        pipe.fit(database.data, database.target)
-        return pipe
+def test_pipe(database_name, model='lda'):
     
-    except Exception as e:
-        logger.info(f'Error fitting lda for {database_name}({subset}): \n {e}')
-
-def get_nmf_train(database_name, K=100):
     try:
-        subset='train'
-        K=100
-        database = load_data(database_name=database_name, subset=subset)
-        tfidf = TfidfVectorizer(max_df=0.95, min_df=2, max_features=5000, stop_words='english', ngram_range=(1, 2))
-        nmf = NMF(n_components=K, max_iter=30, tol=1e-2, random_state=1)
-        rfc = RFC(n_estimators=1000, n_jobs=-1)
-        estimators = [("tfidf", tfidf), ("nmf", nmf), ("rfc", rfc)]
+        database = load_data(database_name=database_name)
+        
+        data_train = list(compress(database.data, database.is_train==1))
+        target_train = list(compress(database.target, database.is_train==1))
+        data_test = list(compress(database.data, database.is_train==0))
+        target_test = list(compress(database.target, database.is_train==0))
+        K = 100
+        
+        if model == 'lda':
 
+            cv = CountVectorizer(max_df=0.95, min_df=2, max_features=5000, stop_words='english', ngram_range=(1, 2))
+            lda = LDA(n_components=K, max_iter=30, random_state=1, n_jobs=-1)
+            rfc = RFC(n_estimators=1000, n_jobs=-1)
+            estimators = [("cv", cv), ("lda", lda), ("rfc", rfc)]
+            
+        elif model == 'nmf':
+            tfidf = TfidfVectorizer(max_df=0.95, min_df=2, max_features=5000, stop_words='english', ngram_range=(1, 2))
+            nmf = NMF(n_components=K, max_iter=30, tol=1e-2, random_state=1)
+            rfc = RFC(n_estimators=1000, n_jobs=-1)
+            estimators = [("tfidf", tfidf), ("nmf", nmf), ("rfc", rfc)]
+            
+        else:
+            logger.info(f'Model {model} not defined.')
+            raise
+            
         pipe = Pipeline(estimators)
-        pipe.fit(database.data, database.target)
-        return pipe
+        pipe.fit(data_train, target_train)
+
+        y_pred = pipe.predict(data_test)
+        micro = f1_score(y_pred, target_test, average='micro')
+        logger.info(f'F1-score for {model} on {database_name}: {micro:4f}')
+        return micro
 
     except Exception as e:
-        logger.info(f'Error fitting nmf for {database_name}({subset}): \n {e}')
-
+        logger.error(f'Error testing model: \n {e}')  
 
 
 def get_heterograph_pbg(pbg):
@@ -967,15 +972,19 @@ def get_heterograph_pbg_features(pbg, doc_features=None):
 def load_bert(database_name):
     
     try: 
-        database_train = load_data(database_name=database_name, subset="train")
-        database_test = load_data(database_name=database_name, subset="test")
+        database = load_data(database_name=database_name)
         
+        x_train = list(compress(database.data, database.is_train==1))
+        y_train = list(compress(database.target, database.is_train==1))
+        x_test = list(compress(database.data, database.is_train==0))
+        y_test = list(compress(database.target, database.is_train==0))
+
         (x_train,  y_train), (x_test, y_test), preproc = text.texts_from_array(
-            x_train=database_train.data,
-            y_train=database_train.target,
-            x_test=database_test.data, 
-            y_test=database_test.target,
-            class_names=database_train.target_names,
+            x_train,
+            y_train,
+            x_test, 
+            y_test,
+            class_names=database.target_names,
             preprocess_mode='bert',
             maxlen=350, 
             max_features=35000)
@@ -991,12 +1000,12 @@ def load_bert(database_name):
         
         logger.info(f'Fitted BERT model on dataset {database_name}.')
         conf_table = learner.validate(val_data=(x_test, y_test),
-                            class_names=database_train.target_names)
+                            class_names=database.target_names)
         
         return conf_table
   
     except Exception as e:
-        logger.info(f'Error fitting pbg for {database_name}: \n {e}')
+        logger.info(f'Error fitting BERT for {database_name}: \n {e}')
 
 def seed_everything(seed: int):
     import random
@@ -1012,17 +1021,6 @@ def seed_everything(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)    
 
-
-def test_pipe(model, database_name):
-    
-    try:
-        database_test = load_data(database_name=database_name, subset="test")
-        y_pred = model.predict(database_test.data)
-        micro = f1_score(y_pred, database_test.target, average='micro')
-        return micro
-
-    except Exception as e:
-        logger.error(f'Error testing model: \n {e}')  
 
 def split_heterodata(heterodata): 
     try:
